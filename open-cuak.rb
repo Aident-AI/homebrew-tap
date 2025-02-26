@@ -1,8 +1,8 @@
 class OpenCuak < Formula
   desc "OpenCUAK - the platform to run reliable automation agents at scale"
   homepage "https://github.com/Aident-AI/open-cuak"
-  url "https://github.com/Aident-AI/open-cuak/archive/v0.0.1-alpha.tar.gz"
-  sha256 "4297e463fc37fffdbe5ad4a2c4dc853696bb39a901db7c04335de8888dd02d5d"
+  url "https://github.com/Aident-AI/homebrew-tap/archive/v0.0.1-alpha.tar.gz"
+  sha256 "a4ceaf2d8af10c89162b757fc690883aae686bfebcd04785f39a9cdcef873c34"
   license "MIT"
 
   depends_on "colima"
@@ -24,8 +24,6 @@ class OpenCuak < Formula
   end
 
   def post_install
-    system "colima", "start", "--cpu", "4", "--memory", "8", "--disk", "30", "--mount-type", "virtiofs"
-    system "docker", "context", "use", "colima"
   end
 
   test do
