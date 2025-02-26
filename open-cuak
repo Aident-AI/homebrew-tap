@@ -13,9 +13,11 @@ init() {
   fi
 
   echo "Pulling latest code from repository..."
-  mkdir -p "$APP_DIR/repo"
-  curl -L https://github.com/Aident-AI/open-cuak/archive/refs/heads/main.zip -o "$APP_DIR/repo/main.zip"
-  unzip "$APP_DIR/repo/main.zip" -d "$APP_DIR/repo"
+  curl -L https://github.com/Aident-AI/open-cuak/archive/refs/heads/main.zip -o "$APP_DIR/main.zip"
+  unzip "$APP_DIR/main.zip" -d "$APP_DIR/temp"
+  mv "$APP_DIR/temp/open-cuak-main" "$APP_DIR/repo"
+  rm -rf "$APP_DIR/temp"
+  rm "$APP_DIR/main.zip"
 }
 
 start_services() {
@@ -24,25 +26,20 @@ start_services() {
     init
   fi
 
-  if colima status &>/dev/null; then
-    if colima status | grep -q "Running"; then
-      echo "Open-CUAK services already running..."
-      return 0
-    else
-      echo "VM exists but not running. Starting Open-CUAK services..."
-      colima start
-      return 0
-    fi
-  fi
-
   current_docker_context=$(docker context show | grep -o 'colima')
-  default_to_colima="$current_docker_context" == "colima"
+  if [ "$current_docker_context" = "colima" ]; then
+    default_to_colima=true
+  else
+    default_to_colima=false
+  fi
   if [ ! $default_to_colima ]; then
     echo "Setting Docker context to colima..."
     docker context use colima
+  else 
+    echo "Docker context already set to colima..."
   fi
-  
-  echo "VM does not exist. Setting up Open-CUAK services..."
+
+  echo "Starting colima VM..."
   colima start --cpu 4 --memory 8 --disk 30 --mount-type virtiofs
   cd "$APP_DIR/repo" && bash quick-start.sh
 
@@ -59,7 +56,7 @@ stop_services() {
 
 restart_services() {
   if colima status &>/dev/null; then
-    if colima status | grep -q "Running"; then
+    if colima list | grep -q "Running"; then
       echo "Open-CUAK services already running..."
       cd "$APP_DIR/repo" && bash quick-stop.sh
       cd "$APP_DIR/repo" && bash quick-start.sh
@@ -85,28 +82,48 @@ status() {
   supabase_ready=false
   supabase_username=""
   supabase_password=""
-  if colima status &>/dev/null; then
-    if colima status | grep -q "Running"; then
-      vm_ready=true
-    fi
+  if colima list | grep -q "Running"; then
+    vm_ready=true
   fi
+
+  get_env_value() {
+    local file="$1"
+    local key="$2"
+    local value=""
+    
+    if [ -f "$file" ]; then
+      value=$(grep "^${key}=" "$file" | sed "s/^${key}=//")
+      value=$(echo "$value" | sed -e 's/^["\x27]//' -e 's/["\x27]$//')
+    fi
+    echo "$value"
+  }
+
+  app_env_path="$APP_DIR/repo/.env.production"
+  supabase_env_path="$APP_DIR/repo/installer/supabase-docker/.env"
+  if [ ! -f "$app_env_path" ]; then
+    echo "App environment file not found at $app_env_path"
+    exit 1
+  fi
+  if [ ! -f "$supabase_env_path" ]; then
+    echo "Supabase environment file not found at $supabase_env_path"
+    exit 1
+  fi
+
+  app_host=$(get_env_value "$app_env_path" "NEXT_PUBLIC_ORIGIN")
+  supabase_host=$(get_env_value "$app_env_path" "NEXT_PUBLIC_SUPABASE_URL")
+  supabase_username=$(get_env_value "$supabase_env_path" "DASHBOARD_USERNAME")
+  supabase_password=$(get_env_value "$supabase_env_path" "DASHBOARD_PASSWORD")
+
   if $vm_ready; then
-    response=$(curl -s http://localhost:3000/api/ping)
+    response=$(curl -s -X POST -d "{}" "$app_host/api/ping")
     if echo "$response" | grep -q '"message":"pong"'; then
       server_ready=true
     fi
 
-    if curl -s http://localhost:8000 &>/dev/null; then
+    if curl -s $supabase_host &>/dev/null; then
       supabase_ready=true
     fi
   fi
-  if [ -f "$APP_DIR/repo/installer/supabase-docker/.env" ]; then
-    supabase_username=$(grep -oP '^DASHBOARD_USERNAME=\K.*' "$APP_DIR/repo/.env.production")
-    supabase_password=$(grep -oP '^DASHBOARD_PASSWORD=\K.*' "$APP_DIR/repo/.env.production")
-  else
-    supabase_ready=false
-  fi
-
 
   echo "VM Ready: $vm_ready"
   echo "Server Ready: $server_ready"
@@ -115,8 +132,8 @@ status() {
     echo "Service Status:"
     echo "  - OpenCUAK: http://localhost:3000"
     echo "  - Supabase Dashboard: http://localhost:8000"
-    echo "    |- username=$supabase_username"
-    echo "    |- password=$supabase_password"
+    echo "    |- username: $supabase_username"
+    echo "    |- password: $supabase_password"
   fi
 }
 
