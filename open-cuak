@@ -138,7 +138,9 @@ status() {
 }
 
 stats() {
+  docker context use colima
   docker stats
+  docker context use default
 }
 
 help() {
