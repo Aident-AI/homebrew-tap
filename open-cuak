@@ -3,15 +3,48 @@
 APP_DIR="$HOME/.open-cuak"
 LIBEXEC_DIR="$(dirname "$(realpath "$0")")"
 
-setup() {
-  echo "Setting up OpenCUAK..."
+init() {
+  echo "Initializing Open-CUAK services..."
+
   mkdir -p "$APP_DIR"
-  cp -r "$LIBEXEC_DIR/docker-compose.yml" "$APP_DIR/"
+  if [ -d "$APP_DIR/repo" ]; then
+    echo "Removing existing repository directory..."
+    rm -rf "$APP_DIR/repo"
+  fi
+
+  echo "Pulling latest code from repository..."
+  mkdir -p "$APP_DIR/repo"
+  curl -L https://github.com/Aident-AI/open-cuak/archive/refs/heads/main.zip -o "$APP_DIR/repo/main.zip"
+  unzip "$APP_DIR/repo/main.zip" -d "$APP_DIR/repo"
 }
 
 start_services() {
-  echo "Starting OpenCUAK services..."
-  bash "$LIBEXEC_DIR/scripts/quick-start.sh"
+  if colima status &>/dev/null; then
+    if colima status | grep -q "Running"; then
+      echo "Open-CUAK services already running..."
+      return 0
+    else
+      echo "VM exists but not running. Starting Open-CUAK services..."
+      colima start
+      return 0
+    fi
+  fi
+
+  current_docker_context = $(docker context show | grep -o 'colima')
+  default_to_colima = "$current_docker_context" == "colima"
+  if [ !default_to_colima ]; then
+    echo "Setting Docker context to colima..."
+    docker context use colima
+  fi
+  
+  echo "VM does not exist. Setting up Open-CUAK services..."
+  colima start --cpu 4 --memory 8 --disk 30 --mount-type virtiofs
+  cd "$APP_DIR/repo" && bash quick-start.sh
+
+  if [ !default_to_colima ]; then
+    echo "Setting Docker context back to default..."
+    docker context use default
+  fi
 }
 
 stop_services() {
@@ -20,16 +53,66 @@ stop_services() {
 }
 
 restart_services() {
-  echo "Restarting OpenCUAK services..."
-  bash "$LIBEXEC_DIR/scripts/quick-stop.sh"
-  bash "$LIBEXEC_DIR/scripts/quick-start.sh"
+  if colima status &>/dev/null; then
+    if colima status | grep -q "Running"; then
+      echo "Open-CUAK services already running..."
+      cd "$APP_DIR/repo" && bash quick-stop.sh
+      cd "$APP_DIR/repo" && bash quick-start.sh
+      return 0
+    else
+      echo "VM exists but not running. Starting Open-CUAK services..."
+      start_services
+    fi
+  else
+    echo "Colima VM does not exist. Starting the services from scratch..."
+    start_services
+  fi
+}
+
+clear() {
+  echo "Clearing Open-CUAK services and data..."
+  colima delete
 }
 
 status() {
-  echo "Service Status:"
-  echo "  - OpenCUAK: http://localhost:3000"
-  echo "  - Supabase Console: http://localhost:8000"
-  echo "  - Supabase Credentials: username=admin, password=admin"
+  vm_ready=false
+  server_ready=false
+  supabase_ready=false
+  supabase_username=""
+  supabase_password=""
+  if colima status &>/dev/null; then
+    if colima status | grep -q "Running"; then
+      vm_ready=true
+    fi
+  fi
+  if $vm_ready; then
+    response=$(curl -s http://localhost:3000/api/ping)
+    if echo "$response" | grep -q '"message":"pong"'; then
+      server_ready=true
+    fi
+
+    if curl -s http://localhost:8000 &>/dev/null; then
+      supabase_ready=true
+    fi
+  fi
+  if [ -f "$APP_DIR/repo/installer/supabase-docker/.env" ]; then
+    supabase_username=$(grep -oP '^DASHBOARD_USERNAME=\K.*' "$APP_DIR/repo/.env.production")
+    supabase_password=$(grep -oP '^DASHBOARD_PASSWORD=\K.*' "$APP_DIR/repo/.env.production")
+  else
+    supabase_ready=false
+  fi
+
+
+  echo "VM Ready: $vm_ready"
+  echo "Server Ready: $server_ready"
+  echo "Supabase Ready: $supabase_ready"
+  if $supabase_ready; then
+    echo "Service Status:"
+    echo "  - OpenCUAK: http://localhost:3000"
+    echo "  - Supabase Dashboard: http://localhost:8000"
+    echo "    |- username=$supabase_username"
+    echo "    |- password=$supabase_password"
+  fi
 }
 
 stats() {
@@ -37,22 +120,24 @@ stats() {
 }
 
 help() {
-  echo "Usage: open-cuak {setup|start|stop|restart|status|stats|help}"
+  echo "Usage: open-cuak {init|start|stop|restart|clear|status|stats|help}"
   echo "Commands:"
-  echo "  setup     - Set up OpenCUAK"
-  echo "  start     - Start OpenCUAK services"
-  echo "  stop      - Stop OpenCUAK services"
-  echo "  restart   - Restart OpenCUAK services"
-  echo "  status    - Show the status of OpenCUAK services"
+  echo "  init      - Initialize Open-CUAK services"
+  echo "  start     - Start Open-CUAK services"
+  echo "  stop      - Stop Open-CUAK services"
+  echo "  restart   - Restart Open-CUAK services"
+  echo "  clear     - Clear Open-CUAK services and data"
+  echo "  status    - Show the status of Open-CUAK services"
   echo "  stats     - Show Docker stats"
   echo "  help      - Show this help message"
 }
 
 case "$1" in
-  setup) setup ;;
+  init) init ;;
   start) start_services ;;
   stop) stop_services ;;
   restart) restart_services ;;
+  clear) clear ;;
   status) status ;;
   stats) stats ;;
   help) help ;;

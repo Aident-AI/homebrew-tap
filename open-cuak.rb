@@ -8,6 +8,7 @@ class OpenCuak < Formula
   depends_on "colima"
   depends_on "docker"
   depends_on "docker-compose"
+  depends_on
 
   def install
     script_path = "open-cuak"
@@ -18,10 +19,17 @@ class OpenCuak < Formula
   end
 
   def post_install
-    puts ">>> Post install"
+    open-cuak init
+    echo "Setting Docker context back to default..."
+    docker context use default
   end
 
   test do
     system "colima", "status"
+  end
+
+  def uninstall
+    system "open-cuak", "clear"
+    system "rm", "-rf", "$HOME/.open-cuak"
   end
 end
