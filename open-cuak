@@ -19,6 +19,11 @@ init() {
 }
 
 start_services() {
+  if [ ! -d "$APP_DIR" ]; then
+    echo "App not initialized. Starting app initialization..."
+    init
+  fi
+
   if colima status &>/dev/null; then
     if colima status | grep -q "Running"; then
       echo "Open-CUAK services already running..."
