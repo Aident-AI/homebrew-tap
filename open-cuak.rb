@@ -12,10 +12,9 @@ class OpenCuak < Formula
   def install
     script_path = "open-cuak"
     chmod 0755, script_path
-    
+
     libexec.install Dir["*"]
     bin.install_symlink libexec/script_path
-    inreplace bin/"open-cuak", "../", "#{libexec}/"
   end
 
   def post_install
