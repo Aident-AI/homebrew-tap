@@ -1,7 +1,7 @@
 class OpenCuak < Formula
   desc "OpenCUAK - the platform to run reliable automation agents at scale"
   homepage "https://github.com/Aident-AI/open-cuak"
-  url "https://github.com/Aident-AI/open-cuak/archive/refs/tags/v1.0.0.tar.gz"
+  url "https://github.com/Aident-AI/open-cuak/archive/v0.0.1-alpha.tar.gz"
   sha256 "4297e463fc37fffdbe5ad4a2c4dc853696bb39a901db7c04335de8888dd02d5d"
   license "MIT"
 
@@ -10,9 +10,16 @@ class OpenCuak < Formula
   depends_on "docker-compose"
 
   def install
-    bin.install "brew/open-cuak.sh"
+    # Ensure libexec directory exists and install everything into it
     libexec.install Dir["*"]
-    # Patch open-cuak.sh to reference files in libexec instead of relative paths
+
+    # Ensure open-cuak.sh is installed in libexec
+    chmod 0755, libexec/"open-cuak.sh"  # Ensure it's executable
+
+    # Create a symlink so users can run `open-cuak` from anywhere
+    bin.install_symlink libexec/"open-cuak.sh"
+
+    # Patch open-cuak.sh to reference libexec paths correctly
     inreplace bin/"open-cuak.sh", "../", "#{libexec}/"
   end
 
