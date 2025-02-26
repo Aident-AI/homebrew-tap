@@ -10,17 +10,27 @@ class OpenCuak < Formula
   depends_on "docker-compose"
 
   def install
-    # Ensure libexec directory exists and install everything into it
     libexec.install Dir["*"]
-
-    # Ensure open-cuak.sh is installed in libexec
-    chmod 0755, libexec/"open-cuak.sh"  # Ensure it's executable
-
-    # Create a symlink so users can run `open-cuak` from anywhere
-    bin.install_symlink libexec/"open-cuak.sh"
-
-    # Patch open-cuak.sh to reference libexec paths correctly
-    inreplace bin/"open-cuak.sh", "../", "#{libexec}/"
+  
+    # Check if open-cuak.sh exists and handle it appropriately
+    if File.exist? "open-cuak.sh"
+      chmod 0755, "open-cuak.sh"
+      bin.install_symlink libexec/"open-cuak.sh"
+    else
+      # If it's not in the root, look for it in the extracted directory
+      open_cuak_script = Dir["*/open-cuak.sh"].first
+      if open_cuak_script
+        chmod 0755, open_cuak_script
+        bin.install_symlink libexec/open_cuak_script
+      else
+        odie "Could not find open-cuak.sh script"
+      end
+    end
+    
+    # Only run inreplace if the symlink exists
+    if File.symlink? bin/"open-cuak.sh"
+      inreplace bin/"open-cuak.sh", "../", "#{libexec}/"
+    end
   end
 
   def post_install
