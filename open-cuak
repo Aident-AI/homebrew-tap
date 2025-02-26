@@ -35,9 +35,9 @@ start_services() {
     fi
   fi
 
-  current_docker_context = $(docker context show | grep -o 'colima')
-  default_to_colima = "$current_docker_context" == "colima"
-  if [ !default_to_colima ]; then
+  current_docker_context=$(docker context show | grep -o 'colima')
+  default_to_colima="$current_docker_context" == "colima"
+  if [ ! $default_to_colima ]; then
     echo "Setting Docker context to colima..."
     docker context use colima
   fi
