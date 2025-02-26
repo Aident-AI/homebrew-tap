@@ -6,9 +6,9 @@ class OpenCuak < Formula
   license "MIT"
 
   depends_on "colima"
+  depends_on "curl"
   depends_on "docker"
   depends_on "docker-compose"
-  depends_on
 
   def install
     script_path = "open-cuak"
