@@ -36,6 +36,18 @@ stats() {
   docker stats
 }
 
+help() {
+  echo "Usage: open-cuak {setup|start|stop|restart|status|stats|help}"
+  echo "Commands:"
+  echo "  setup     - Set up OpenCUAK"
+  echo "  start     - Start OpenCUAK services"
+  echo "  stop      - Stop OpenCUAK services"
+  echo "  restart   - Restart OpenCUAK services"
+  echo "  status    - Show the status of OpenCUAK services"
+  echo "  stats     - Show Docker stats"
+  echo "  help      - Show this help message"
+}
+
 case "$1" in
 setup) setup ;;
 start) start_services ;;
@@ -43,5 +55,6 @@ stop) stop_services ;;
 restart) restart_services ;;
 status) status ;;
 stats) stats ;;
-*) echo "Usage: open-cuak {setup|start|stop|restart|status|stats}" ;;
+help) help ;;
+*) help ;;
 esac
