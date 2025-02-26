@@ -7,7 +7,7 @@ if [ -z "$1" ]; then
 fi
 
 VERSION_TAG=$1
-URL="https://github.com/Aident-AI/homebrew-tap/archive/v${VERSION_TAG}.tar.gz"
+URL="https://github.com/Aident-AI/homebrew-tap/archive/${VERSION_TAG}.tar.gz"
 OUTPUT_FILE=~/Downloads/homebrew-tap-${VERSION_TAG}.tar.gz
 
 curl -L -o $OUTPUT_FILE $URL
