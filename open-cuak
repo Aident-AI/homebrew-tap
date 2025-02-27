@@ -82,7 +82,7 @@ status() {
   supabase_ready=false
   supabase_username=""
   supabase_password=""
-  if colima list | grep -q "Running"; then
+  if colima list 2>/dev/null | grep -q "Running"; then
     vm_ready=true
   fi
 
