@@ -35,7 +35,7 @@ start_services() {
   if [ ! $default_to_colima ]; then
     echo "Setting Docker context to colima..."
     docker context use colima
-  else 
+  else
     echo "Docker context already set to colima..."
   fi
 
@@ -90,7 +90,7 @@ status() {
     local file="$1"
     local key="$2"
     local value=""
-    
+
     if [ -f "$file" ]; then
       value=$(grep "^${key}=" "$file" | sed "s/^${key}=//")
       value=$(echo "$value" | sed -e 's/^["\x27]//' -e 's/["\x27]$//')
@@ -143,27 +143,144 @@ stats() {
   docker context use default
 }
 
+version() {
+  # Show CLI version from Homebrew formula
+  if command -v brew &>/dev/null; then
+    # Check if the formula is installed via Homebrew
+    if brew list open-cuak &>/dev/null; then
+      # Try to get version directly from brew info command
+      CLI_VERSION=$(brew info open-cuak --json | grep -o '"version":"[^"]*' | head -1 | cut -d'"' -f4)
+      if [ -z "$CLI_VERSION" ]; then
+        # Fallback to formula file if available
+        FORMULA_PATH=$(brew formula open-cuak)
+        if [ -f "$FORMULA_PATH" ]; then
+          CLI_VERSION=$(grep -o 'url.*v[0-9][0-9.]*' "$FORMULA_PATH" | grep -o 'v[0-9][0-9.]*' | head -1)
+        fi
+      fi
+
+      # Clean up the version string - remove any trailing periods or unwanted characters
+      CLI_VERSION=$(echo "$CLI_VERSION" | sed 's/[.]$//' | tr -cd 'v0-9.')
+
+      if [ -n "$CLI_VERSION" ]; then
+        echo "Open-CUAK CLI Version: ${CLI_VERSION} (Homebrew)"
+      else
+        echo "Open-CUAK CLI Version: Unknown (Could not determine Homebrew version)"
+      fi
+    else
+      echo "Open-CUAK CLI Version: Unknown (Not installed via Homebrew)"
+    fi
+  else
+    # Fallback to VERSION file if Homebrew is not available
+    VERSION_FILE="${LIBEXEC_DIR}/VERSION"
+    if [ -f "$VERSION_FILE" ]; then
+      CLI_VERSION=$(cat "$VERSION_FILE" | tr -d '[:space:]')
+      echo "Open-CUAK CLI Version: $CLI_VERSION (from VERSION file)"
+    else
+      echo "Open-CUAK CLI Version: Unknown (VERSION file not found)"
+    fi
+  fi
+
+  # Show App version
+  example_env_path="$APP_DIR/repo/.example.env.production"
+
+  if [ ! -d "$APP_DIR/repo" ]; then
+    echo "Repository not initialized. Run 'open-cuak init' first."
+    return 1
+  fi
+
+  if [ -f "$example_env_path" ]; then
+    version=$(grep "^OPEN_CUAK_VERSION=" "$example_env_path" | sed "s/^OPEN_CUAK_VERSION=//")
+    version=$(echo "$version" | sed -e 's/^["\x27]//' -e 's/["\x27]$//')
+
+    if [ -n "$version" ]; then
+      echo "Open-CUAK App Version: $version"
+
+      if [ "$version" = "stable" ] || [ "$version" = "latest" ]; then
+        echo "  |- Using $version release channel"
+      else
+        echo "  |- Using specific commit/tag: $version"
+      fi
+    else
+      echo "Open-CUAK App Version: Not set"
+    fi
+  else
+    echo "Open-CUAK App Version: Not available (example environment file not found)"
+  fi
+}
+
+use() {
+  example_env_path="$APP_DIR/repo/.example.env.production"
+
+  if [ ! -d "$APP_DIR/repo" ]; then
+    echo "Repository not initialized. Run 'open-cuak init' first."
+    exit 1
+  fi
+
+  # A version must be provided as an argument
+  if [ -z "$1" ]; then
+    echo "Error: Version argument is required."
+    echo "Usage: open-cuak use VERSION"
+    echo "Example: open-cuak use stable"
+    exit 1
+  fi
+
+  if [ ! -f "$example_env_path" ]; then
+    echo "Example environment file not found at $example_env_path"
+    echo "Creating new .example.env.production file..."
+    touch "$example_env_path"
+  fi
+
+  # Check if OPEN_CUAK_VERSION already exists in the file
+  if grep -q "^OPEN_CUAK_VERSION=" "$example_env_path"; then
+    # Replace existing value
+    sed -i.bak "s/^OPEN_CUAK_VERSION=.*$/OPEN_CUAK_VERSION=$1/" "$example_env_path"
+    rm -f "${example_env_path}.bak"
+  else
+    # Add new value
+    echo "OPEN_CUAK_VERSION=$1" >>"$example_env_path"
+  fi
+
+  echo "App version set to: $1"
+
+  # Pull environment variables for all packages
+  echo "Updating environment variables for all packages..."
+  if [ -f "$APP_DIR/repo/scripts/pull-envs-for-all-packages.sh" ]; then
+    cd "$APP_DIR/repo" && bash scripts/pull-envs-for-all-packages.sh >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+      echo "Environment variables updated successfully."
+    else
+      echo "Warning: Failed to update environment variables."
+    fi
+  else
+    echo "Warning: Environment update script not found at $APP_DIR/repo/scripts/pull-envs-for-all-packages.sh"
+  fi
+}
+
 help() {
-  echo "Usage: open-cuak {init|start|stop|restart|clear|status|stats|help}"
+  echo "Usage: open-cuak {init|start|stop|restart|clear|status|stats|version|use VERSION|help}"
   echo "Commands:"
-  echo "  init      - Initialize Open-CUAK services"
-  echo "  start     - Start Open-CUAK services"
-  echo "  stop      - Stop Open-CUAK services"
-  echo "  restart   - Restart Open-CUAK services"
-  echo "  clear     - Clear Open-CUAK services and data"
-  echo "  status    - Show the status of Open-CUAK services"
-  echo "  stats     - Show Docker stats"
-  echo "  help      - Show this help message"
+  echo "  init        - Initialize Open-CUAK services"
+  echo "  start       - Start Open-CUAK services"
+  echo "  stop        - Stop Open-CUAK services"
+  echo "  restart     - Restart Open-CUAK services"
+  echo "  clear       - Clear Open-CUAK services and data"
+  echo "  status      - Show the status of Open-CUAK services"
+  echo "  stats       - Show Docker stats"
+  echo "  version     - Show CLI and app versions"
+  echo "  use VERSION - Set the version of Open-CUAK app image to pull (stable/latest/specific-sha)"
+  echo "  help        - Show this help message"
 }
 
 case "$1" in
-  init) init ;;
-  start) start_services ;;
-  stop) stop_services ;;
-  restart) restart_services ;;
-  clear) clear ;;
-  status) status ;;
-  stats) stats ;;
-  help) help ;;
-  *) help ;;
+init) init ;;
+start) start_services ;;
+stop) stop_services ;;
+restart) restart_services ;;
+clear) clear ;;
+status) status ;;
+stats) stats ;;
+version) version ;;
+use) use "$2" ;;
+help) help ;;
+*) help ;;
 esac
