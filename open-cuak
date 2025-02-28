@@ -256,8 +256,60 @@ use() {
   fi
 }
 
+logs() {
+  # Check if a container name is provided
+  if [ -z "$1" ]; then
+    echo "Error: Container name is required."
+    echo "Usage: open-cuak logs {web|browserless} [OPTIONS]"
+    echo "Example: open-cuak logs web"
+    echo "Example with options: open-cuak logs browserless --tail 100"
+    return 1
+  fi
+
+  # Set the Docker context to colima
+  current_docker_context=$(docker context show | grep -o 'colima')
+  if [ "$current_docker_context" != "colima" ]; then
+    echo "Setting Docker context to colima..."
+    docker context use colima
+  fi
+
+  # Determine the container name based on the argument
+  case "$1" in
+  web)
+    container_name="open-cuak-web"
+    ;;
+  browserless)
+    container_name="open-cuak-browserless"
+    ;;
+  *)
+    echo "Error: Unknown container '$1'."
+    echo "Available containers: web, browserless"
+    docker context use default 2>/dev/null
+    return 1
+    ;;
+  esac
+
+  # Check if the container is running
+  if ! docker ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
+    echo "Error: Container '$container_name' is not running."
+    docker context use default 2>/dev/null
+    return 1
+  fi
+
+  # Shift the first argument to pass any remaining arguments to docker logs
+  shift
+  echo "Showing logs for container: $container_name"
+  docker logs -f "$container_name" "$@"
+
+  # Set Docker context back to default if it wasn't colima initially
+  if [ "$current_docker_context" != "colima" ]; then
+    echo "Setting Docker context back to default..."
+    docker context use default
+  fi
+}
+
 help() {
-  echo "Usage: open-cuak {init|start|stop|restart|clear|status|stats|version|use VERSION|help}"
+  echo "Usage: open-cuak {init|start|stop|restart|clear|status|stats|logs|version|use VERSION|help}"
   echo "Commands:"
   echo "  init        - Initialize Open-CUAK services"
   echo "  start       - Start Open-CUAK services"
@@ -266,6 +318,7 @@ help() {
   echo "  clear       - Clear Open-CUAK services and data"
   echo "  status      - Show the status of Open-CUAK services"
   echo "  stats       - Show Docker stats"
+  echo "  logs        - Show logs for a specific container (web|browserless)"
   echo "  version     - Show CLI and app versions"
   echo "  use VERSION - Set the version of Open-CUAK app image to pull (stable/latest/specific-sha)"
   echo "  help        - Show this help message"
@@ -279,6 +332,7 @@ restart) restart_services ;;
 clear) clear ;;
 status) status ;;
 stats) stats ;;
+logs) logs "$2" "${@:3}" ;;
 version) version ;;
 use) use "$2" ;;
 help) help ;;
