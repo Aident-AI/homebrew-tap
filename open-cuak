@@ -33,7 +33,6 @@ start_services() {
     default_to_colima=false
   fi
   if [ ! $default_to_colima ]; then
-    echo "Setting Docker context to colima..."
     docker context use colima
   else
     echo "Docker context already set to colima..."
@@ -206,6 +205,52 @@ version() {
   else
     echo "Open-CUAK App Version: Not available (example environment file not found)"
   fi
+
+  # Show Docker image SHAs
+  current_docker_context=$(docker context show 2>/dev/null | grep -o 'colima')
+  context_changed=false
+  if [ "$current_docker_context" != "colima" ]; then
+    if docker context ls 2>/dev/null | grep -q "colima"; then
+      docker context use colima >/dev/null 2>&1
+      context_changed=true
+    fi
+  fi
+
+  # Check if colima is running
+  if colima status &>/dev/null; then
+    # Get open-cuak-web image info
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^open-cuak-web$"; then
+      web_image_id=$(docker inspect --format='{{.Image}}' open-cuak-web 2>/dev/null)
+      web_image_info=$(docker image inspect "$web_image_id" --format='{{index .RepoTags 0}} (SHA: {{.Id}})' 2>/dev/null)
+      if [ -n "$web_image_info" ]; then
+        echo "  |- open-cuak-web: $web_image_info"
+      else
+        echo "  |- open-cuak-web: Running but image info not available"
+      fi
+    else
+      echo "  |- open-cuak-web: Not running"
+    fi
+
+    # Get open-cuak-browserless image info
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^open-cuak-browserless$"; then
+      browserless_image_id=$(docker inspect --format='{{.Image}}' open-cuak-browserless 2>/dev/null)
+      browserless_image_info=$(docker image inspect "$browserless_image_id" --format='{{index .RepoTags 0}} (SHA: {{.Id}})' 2>/dev/null)
+      if [ -n "$browserless_image_info" ]; then
+        echo "  |- open-cuak-browserless: $browserless_image_info"
+      else
+        echo "  |- open-cuak-browserless: Running but image info not available"
+      fi
+    else
+      echo "  |- open-cuak-browserless: Not running"
+    fi
+  else
+    echo "  |- Colima not running. Start services to view image information."
+  fi
+
+  # Restore Docker context if changed
+  if [ "$context_changed" = true ]; then
+    docker context use default >/dev/null 2>&1
+  fi
 }
 
 use() {
@@ -222,6 +267,12 @@ use() {
     echo "Usage: open-cuak use VERSION"
     echo "Example: open-cuak use stable"
     exit 1
+  fi
+
+  # Store the current version before changing it
+  current_version=""
+  if [ -f "$example_env_path" ] && grep -q "^OPEN_CUAK_VERSION=" "$example_env_path"; then
+    current_version=$(grep "^OPEN_CUAK_VERSION=" "$example_env_path" | sed "s/^OPEN_CUAK_VERSION=//" | sed -e 's/^["\x27]//' -e 's/["\x27]$//')
   fi
 
   if [ ! -f "$example_env_path" ]; then
@@ -254,6 +305,60 @@ use() {
   else
     echo "Warning: Environment update script not found at $APP_DIR/repo/scripts/pull-envs-for-all-packages.sh"
   fi
+
+  # Check if version has changed and services need to be updated
+  if [ "$current_version" != "$1" ] && [ -n "$current_version" ]; then
+    echo "Version changed from $current_version to $1. Updating services..."
+
+    # Check if colima is running
+    if colima status &>/dev/null; then
+      # Set Docker context to colima
+      current_docker_context=$(docker context show 2>/dev/null | grep -o 'colima')
+      context_changed=false
+      if [ "$current_docker_context" != "colima" ]; then
+        if docker context ls 2>/dev/null | grep -q "colima"; then
+          docker context use colima >/dev/null 2>&1
+          context_changed=true
+        fi
+      fi
+
+      # Pull the latest images
+      echo "Pulling latest images for version $1..."
+
+      # Check if containers are running and pull images
+      if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^open-cuak-web$"; then
+        echo "Pulling open-cuak-web image..."
+        docker pull ghcr.io/aident-ai/open-cuak-web:$1
+      fi
+
+      if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^open-cuak-browserless$"; then
+        echo "Pulling open-cuak-browserless image..."
+        docker pull ghcr.io/aident-ai/open-cuak-browserless:$1
+      fi
+
+      # Restart services
+      echo "Restarting services with new version..."
+      if [ -f "$APP_DIR/repo/quick-stop.sh" ] && [ -f "$APP_DIR/repo/quick-start.sh" ]; then
+        cd "$APP_DIR/repo" && bash quick-stop.sh
+        cd "$APP_DIR/repo" && bash quick-start.sh
+        echo "Services restarted successfully with version $1."
+      else
+        echo "Warning: quick-stop.sh or quick-start.sh not found. Attempting to restart services..."
+        restart_services
+      fi
+
+      # Restore Docker context if changed
+      if [ "$context_changed" = true ]; then
+        docker context use default >/dev/null 2>&1
+      fi
+    else
+      echo "Colima is not running. Start services with 'open-cuak start' to apply the new version."
+    fi
+  elif [ -z "$current_version" ]; then
+    echo "No previous version found. Start services with 'open-cuak start' to apply the version."
+  else
+    echo "Version unchanged. No need to restart services."
+  fi
 }
 
 logs() {
@@ -269,7 +374,6 @@ logs() {
   # Set the Docker context to colima
   current_docker_context=$(docker context show | grep -o 'colima')
   if [ "$current_docker_context" != "colima" ]; then
-    echo "Setting Docker context to colima..."
     docker context use colima
   fi
 
