@@ -18,6 +18,11 @@ init() {
   mv "$APP_DIR/temp/open-cuak-main" "$APP_DIR/repo"
   rm -rf "$APP_DIR/temp"
   rm "$APP_DIR/main.zip"
+
+  # Create necessary directories with correct permissions
+  echo "Setting up required directories with proper permissions..."
+  mkdir -p "$APP_DIR/repo/installer/supabase-docker/volumes/storage"
+  chmod -R 777 "$APP_DIR/repo/installer/supabase-docker/volumes"
 }
 
 start_services() {
@@ -39,7 +44,7 @@ start_services() {
   fi
 
   echo "Starting colima VM..."
-  colima start --cpu 4 --memory 8 --disk 30 --mount-type virtiofs
+  colima start --cpu 4 --memory 8 --disk 30 --mount-type 9p --mount-opts "cache=fscache,nolocks"
   cd "$APP_DIR/repo" && bash quick-start.sh
 
   if [ !default_to_colima ]; then
