@@ -4,18 +4,20 @@ APP_DIR="$HOME/.open-cuak"
 LIBEXEC_DIR="$(dirname "$(realpath "$0")")"
 DOCKER_CMD="docker --context colima"
 
+# Detect the OS
+OS_TYPE=$(uname)
+BASH_CMD="bash"
+CHMOD_CMD="chmod -R 777"
+RM_DIR_CMD="rm -rf"
+if [ "$OS_TYPE" == "Linux" ]; then
+  echo "Linux detected, using sudo"
+  BASH_CMD="sudo bash"
+  CHMOD_CMD="sudo chmod -R 777"
+  RM_DIR_CMD="sudo rm -rf"
+fi
+
 init() {
   echo "Initializing Open-CUAK services..."
-
-  # Detect the OS
-  OS_TYPE=$(uname)
-  RM_DIR_CMD="rm -rf"
-  CHMOD_CMD="chmod -R 777"
-  if [ "$OS_TYPE" == "Linux" ]; then
-    echo "Linux detected, using sudo"
-    RM_DIR_CMD="sudo rm -rf"
-    CHMOD_CMD="sudo chmod -R 777"
-  fi
 
   mkdir -p "$APP_DIR"
   if [ -d "$APP_DIR/repo" ]; then
@@ -45,7 +47,7 @@ start_services() {
 
   echo "Starting colima VM..."
   colima start --cpu 4 --memory 8 --disk 30 --mount-type virtiofs
-  cd "$APP_DIR/repo" && bash quick-start.sh
+  cd "$APP_DIR/repo" && $BASH_CMD quick-start.sh
 }
 
 stop_services() {
@@ -57,8 +59,8 @@ restart_services() {
   if colima status &>/dev/null; then
     if colima list | grep -q "Running"; then
       echo "Open-CUAK services already running..."
-      cd "$APP_DIR/repo" && bash quick-stop.sh
-      cd "$APP_DIR/repo" && bash quick-start.sh
+      cd "$APP_DIR/repo" && $BASH_CMD quick-stop.sh
+      cd "$APP_DIR/repo" && $BASH_CMD quick-start.sh
       return 0
     else
       echo "VM exists but not running. Starting Open-CUAK services..."
@@ -279,7 +281,7 @@ use() {
   # Pull environment variables for all packages
   echo "Updating environment variables for all packages..."
   if [ -f "$APP_DIR/repo/scripts/pull-envs-for-all-packages.sh" ]; then
-    cd "$APP_DIR/repo" && bash scripts/pull-envs-for-all-packages.sh >/dev/null 2>&1
+    cd "$APP_DIR/repo" && $BASH_CMD scripts/pull-envs-for-all-packages.sh >/dev/null 2>&1
     if [ $? -eq 0 ]; then
       echo "Environment variables updated successfully."
     else
@@ -312,8 +314,8 @@ use() {
       # Restart services
       echo "Restarting services with new version..."
       if [ -f "$APP_DIR/repo/quick-stop.sh" ] && [ -f "$APP_DIR/repo/quick-start.sh" ]; then
-        cd "$APP_DIR/repo" && bash quick-stop.sh
-        cd "$APP_DIR/repo" && bash quick-start.sh
+        cd "$APP_DIR/repo" && $BASH_CMD quick-stop.sh
+        cd "$APP_DIR/repo" && $BASH_CMD quick-start.sh
         echo "Services restarted successfully with version $1."
       else
         echo "Warning: quick-stop.sh or quick-start.sh not found. Attempting to restart services..."
