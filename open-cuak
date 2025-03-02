@@ -9,35 +9,31 @@ init() {
 
   # Detect the OS
   OS_TYPE=$(uname)
+  RM_DIR_CMD="rm -rf"
+  CHMOD_CMD="chmod -R 777"
+  if [ "$OS_TYPE" == "Linux" ]; then
+    echo "Linux detected, using sudo"
+    RM_DIR_CMD="sudo rm -rf"
+    CHMOD_CMD="sudo chmod -R 777"
+  fi
 
   mkdir -p "$APP_DIR"
   if [ -d "$APP_DIR/repo" ]; then
     echo "Removing existing repository directory..."
-    if [ "$OS_TYPE" = "Linux" ] && [ ! -w "$APP_DIR/repo" ]; then
-      echo "Linux detected, using sudo to remove directory..."
-      sudo rm -rf "$APP_DIR/repo"
-    else
-      rm -rf "$APP_DIR/repo"
-    fi
+    $RM_DIR_CMD "$APP_DIR/repo"
   fi
 
   echo "Pulling latest code from repository..."
   curl -L https://github.com/Aident-AI/open-cuak/archive/refs/heads/main.zip -o "$APP_DIR/main.zip"
-  unzip "$APP_DIR/main.zip" -d "$APP_DIR/temp"
+  unzip -q "$APP_DIR/main.zip" -d "$APP_DIR/temp" &>/dev/null
   mv "$APP_DIR/temp/open-cuak-main" "$APP_DIR/repo"
-  rm -rf "$APP_DIR/temp"
-  rm "$APP_DIR/main.zip"
+  $RM_DIR_CMD -rf "$APP_DIR/temp"
+  $RM_DIR_CMD "$APP_DIR/main.zip"
+  echo "Unzipped the repository to $APP_DIR/repo"
 
   # Create necessary directories with correct permissions
   echo "Setting up required directories with proper permissions..."
-  mkdir -p "$APP_DIR/repo/installer/supabase-docker/volumes/storage"
-
-  if [ "$OS_TYPE" = "Linux" ]; then
-    echo "Linux detected, using sudo to set permissions..."
-    sudo chmod -R 777 "$APP_DIR/repo/installer/supabase-docker/volumes"
-  else
-    chmod -R 777 "$APP_DIR/repo/installer/supabase-docker/volumes"
-  fi
+  $CHMOD_CMD "$APP_DIR/repo"
   echo "Open-CUAK services initialized successfully."
 }
 
