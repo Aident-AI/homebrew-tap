@@ -47,7 +47,10 @@ start_services() {
 
   echo "Starting colima VM..."
   colima start --cpu 4 --memory 8 --disk 30 --mount-type virtiofs
+
+  docker context use colima
   cd "$APP_DIR/repo" && $BASH_CMD quick-start.sh
+  docker context use default
 }
 
 stop_services() {
@@ -59,8 +62,10 @@ restart_services() {
   if colima status &>/dev/null; then
     if colima list | grep -q "Running"; then
       echo "Open-CUAK services already running..."
+      docker context use colima
       cd "$APP_DIR/repo" && $BASH_CMD quick-stop.sh
       cd "$APP_DIR/repo" && $BASH_CMD quick-start.sh
+      docker context use default
       return 0
     else
       echo "VM exists but not running. Starting Open-CUAK services..."
@@ -314,8 +319,10 @@ use() {
       # Restart services
       echo "Restarting services with new version..."
       if [ -f "$APP_DIR/repo/quick-stop.sh" ] && [ -f "$APP_DIR/repo/quick-start.sh" ]; then
+        docker context use colima
         cd "$APP_DIR/repo" && $BASH_CMD quick-stop.sh
         cd "$APP_DIR/repo" && $BASH_CMD quick-start.sh
+        docker context use default
         echo "Services restarted successfully with version $1."
       else
         echo "Warning: quick-stop.sh or quick-start.sh not found. Attempting to restart services..."
