@@ -7,10 +7,18 @@ DOCKER_CMD="docker --context colima"
 init() {
   echo "Initializing Open-CUAK services..."
 
+  # Detect the OS
+  OS_TYPE=$(uname)
+
   mkdir -p "$APP_DIR"
   if [ -d "$APP_DIR/repo" ]; then
     echo "Removing existing repository directory..."
-    rm -rf "$APP_DIR/repo"
+    if [ "$OS_TYPE" = "Linux" ] && [ ! -w "$APP_DIR/repo" ]; then
+      echo "Linux detected, using sudo to remove directory..."
+      sudo rm -rf "$APP_DIR/repo"
+    else
+      rm -rf "$APP_DIR/repo"
+    fi
   fi
 
   echo "Pulling latest code from repository..."
@@ -23,7 +31,14 @@ init() {
   # Create necessary directories with correct permissions
   echo "Setting up required directories with proper permissions..."
   mkdir -p "$APP_DIR/repo/installer/supabase-docker/volumes/storage"
-  chmod -R 777 "$APP_DIR/repo/installer/supabase-docker/volumes"
+
+  if [ "$OS_TYPE" = "Linux" ]; then
+    echo "Linux detected, using sudo to set permissions..."
+    sudo chmod -R 777 "$APP_DIR/repo/installer/supabase-docker/volumes"
+  else
+    chmod -R 777 "$APP_DIR/repo/installer/supabase-docker/volumes"
+  fi
+  echo "Open-CUAK services initialized successfully."
 }
 
 start_services() {
