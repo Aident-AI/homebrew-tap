@@ -118,8 +118,8 @@ status() {
   echo "Supabase Ready: $supabase_ready"
   if $supabase_ready; then
     echo "Service Status:"
-    echo "  - OpenCUAK: http://localhost:3000"
-    echo "  - Supabase Dashboard: http://localhost:8000"
+    echo "  - OpenCUAK: $app_host"
+    echo "  - Supabase Dashboard: $supabase_host"
     echo "    |- username: $supabase_username"
     echo "    |- password: $supabase_password"
   fi
