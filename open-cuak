@@ -48,7 +48,7 @@ start_services() {
   fi
 
   echo "Starting colima VM..."
-  colima start --cpu 4 --memory 8 --disk 30 --mount-type 9p --mount-opts "cache=fscache,nolocks"
+  colima start --cpu 4 --memory 8 --disk 30 --mount-type virtiofs
   cd "$APP_DIR/repo" && bash quick-start.sh
 }
 
