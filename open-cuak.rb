@@ -1,8 +1,8 @@
 class OpenCuak < Formula
   desc "OpenCUAK - the platform to run reliable automation agents at scale"
   homepage "https://github.com/Aident-AI/open-cuak"
-  url "https://github.com/Aident-AI/homebrew-tap/archive/v0.0.5.tar.gz"
-  sha256 "0f1e8a8de73f9d3564ffa74fbe6af66ec7f10e8bfddb97bfa6d7fe3a96a57161"
+  url "https://github.com/Aident-AI/homebrew-tap/archive/v0.0.6.tar.gz"
+  sha256 "d5cc9d934a64354232f1d1e2338d63854ba2ce75919c91d04f3e88488d41d66b"
   license "MIT"
 
   depends_on "colima"
