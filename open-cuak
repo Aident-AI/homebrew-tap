@@ -126,9 +126,9 @@ status() {
     fi
   fi
 
-  echo "VM Ready: $vm_ready"
-  echo "Server Ready: $server_ready"
-  echo "Supabase Ready: $supabase_ready"
+  echo "VM Ready: $([ "$vm_ready" = true ] && echo "✅" || echo "❌")"
+  echo "Server Ready: $([ "$server_ready" = true ] && echo "✅" || echo "❌")"
+  echo "Supabase Ready: $([ "$supabase_ready" = true ] && echo "✅" || echo "❌")"
   if $supabase_ready; then
     echo "Service Status:"
     echo "  - OpenCUAK: $app_host"
