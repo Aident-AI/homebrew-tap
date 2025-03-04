@@ -11,7 +11,7 @@ CHMOD_CMD="chmod -R 777"
 RM_DIR_CMD="rm -rf"
 if [ "$OS_TYPE" == "Linux" ]; then
   echo "Linux detected, using sudo"
-  BASH_CMD="sudo bash"
+  BASH_CMD="sudo -E bash"
   CHMOD_CMD="sudo chmod -R 777"
   RM_DIR_CMD="sudo rm -rf"
 fi
