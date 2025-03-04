@@ -20,7 +20,7 @@ class OpenCuak < Formula
 
   def post_install
     echo "Setting Docker context back to default..."
-    docker context use default
+    system "docker", "context", "use", "default"
   end
 
   test do
