@@ -7,12 +7,10 @@ DOCKER_CMD="docker --context colima"
 # Detect the OS
 OS_TYPE=$(uname)
 BASH_CMD="bash"
-CHMOD_CMD="chmod -R 777"
 RM_DIR_CMD="rm -rf"
 if [ "$OS_TYPE" == "Linux" ]; then
   echo "Linux detected, using sudo"
   BASH_CMD="sudo -E bash"
-  CHMOD_CMD="sudo chmod -R 777"
   RM_DIR_CMD="sudo rm -rf"
 fi
 
@@ -35,7 +33,6 @@ init() {
 
   # Create necessary directories with correct permissions
   echo "Setting up required directories with proper permissions..."
-  $CHMOD_CMD "$APP_DIR/repo"
   echo "Open-CUAK services initialized successfully."
 }
 
