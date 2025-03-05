@@ -53,7 +53,7 @@
 	<key>ScriptArgs</key>
 	<array/>
 	<key>ScriptPath</key>
-	<string>/Users/ljhskyso/repos/homebrew-tap/open-cuak</string>
+	<string>/Users/ljhskyso/repos/homebrew-tap/platypus-script.sh</string>
 	<key>SendNotifications</key>
 	<true/>
 	<key>StatusItemDisplayType</key>
@@ -35842,7 +35842,7 @@
 	<key>StatusItemIconIsTemplate</key>
 	<true/>
 	<key>StatusItemTitle</key>
-	<string>Title</string>
+	<string>Macbeth</string>
 	<key>StatusItemUseSystemFont</key>
 	<true/>
 	<key>Suffixes</key>
