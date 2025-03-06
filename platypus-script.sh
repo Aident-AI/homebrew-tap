@@ -63,18 +63,18 @@ parse_argument() {
 
 # Map the displayed menu label to the internal command keyword.
 get_command() {
-  local label="$1"
-  case "$label" in
-  "Initialize Open-CUAK") echo "init" ;;
-  "Start Open-CUAK") echo "start" ;;
-  "Stop Open-CUAK") echo "stop" ;;
-  "Restart Open-CUAK") echo "restart" ;;
-  "Check Status") echo "status" ;;
-  "View Docker Stats") echo "stats" ;;
-  "Clear Open-CUAK") echo "clear" ;;
-  "Check Version") echo "version" ;;
-  *) echo "$label" ;;
-  esac
+  local search_term="$1"
+  local command=""
+
+  for option in "${MENU_OPTIONS[@]}"; do
+    local label="${option%%<||>*}"
+    if [ "$label" = "$search_term" ]; then
+      command="${option#*<||>}"
+      break
+    fi
+  done
+
+  echo "$command"
 }
 
 # -----------------------------
@@ -117,20 +117,20 @@ execute_command() {
 # Menu for Terminal Testing (Optional)
 # -----------------------------
 MENU_OPTIONS=(
-  "🆕  Initialize:init"
-  "▶️  Start Services:start"
-  "⏹️  Stop Services:stop"
-  "🔄  Restart Services:restart"
-  "🧹  Clear Services:clear"
-  "🔍  Check Services Status:status"
-  "ℹ️  Check Version:version"
-  "📊  View Docker Stats:stats"
+  "🆕  Initialize<||>init"
+  "▶️  Start Services<||>start"
+  "⏹️  Stop Services<||>stop"
+  "🔄  Restart Services<||>restart"
+  "🧹  Clear Services<||>clear"
+  "🔍  Check Services Status<||>status"
+  "ℹ️  Check Version<||>version"
+  "📊  View Docker Stats<||>stats"
 )
 
 show_menu() {
   for ((i = 0; i < ${#MENU_OPTIONS[@]}; i++)); do
     option="${MENU_OPTIONS[$i]}"
-    label="${option%%:*}"
+    label="${option%%<||>*}"
     echo "$label"
   done
 }
