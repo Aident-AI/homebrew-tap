@@ -261,9 +261,23 @@ start_services() {
     init
   fi
 
+  # Check if colima VM exists
+  vm_exists=false
+  if colima status &>/dev/null; then
+    vm_exists=true
+  fi
+
   echo "Starting colima VM..."
   colima start --cpu 4 --memory 8 --disk 30 --mount-type virtiofs
-  load_images
+
+  # Only load images if VM didn't exist before (new VM or previously deleted)
+  if [ "$vm_exists" = false ]; then
+    echo "New VM detected. Loading images..."
+    load_images
+  else
+    echo "Existing VM detected. Skipping image loading..."
+  fi
+
   cd "$APP_DIR/repo" && $BASH_CMD quick-start.sh --colima
 }
 
@@ -281,7 +295,11 @@ restart_services() {
       return 0
     else
       echo "VM exists but not running. Starting Open-CUAK services..."
-      start_services
+      # Set vm_exists to true before calling start_services to skip image loading
+      vm_exists=true
+      colima start --cpu 4 --memory 8 --disk 30 --mount-type virtiofs
+      echo "Existing VM detected. Skipping image loading..."
+      cd "$APP_DIR/repo" && $BASH_CMD quick-start.sh --colima
     fi
   else
     echo "Colima VM does not exist. Starting the services from scratch..."
