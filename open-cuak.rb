@@ -19,8 +19,7 @@ class OpenCuak < Formula
   end
 
   def post_install
-    system "echo", "\"Setting Docker context back to default...\""
-    system "docker", "context", "use", "default"
+    system "echo", "\"Open-CUAK installed successfully!\""
   end
 
   test do
