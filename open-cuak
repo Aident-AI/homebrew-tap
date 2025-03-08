@@ -36,6 +36,225 @@ init() {
   echo "Open-CUAK services initialized successfully."
 }
 
+load_images() {
+  # Check if docker-images directory exists
+  DOCKER_IMAGES_DIR="$APP_DIR/docker-images"
+  if [ ! -d "$DOCKER_IMAGES_DIR" ]; then
+    echo "No docker-images directory found at $DOCKER_IMAGES_DIR. Skipping image loading."
+    return 0
+  fi
+
+  # Check if there are any .tar.gz files in the directory
+  if ! ls "$DOCKER_IMAGES_DIR"/*.tar.gz >/dev/null 2>&1; then
+    echo "No docker image archives found in $DOCKER_IMAGES_DIR. Skipping image loading."
+    return 0
+  fi
+
+  echo "Found docker image archives in $DOCKER_IMAGES_DIR. Loading images..."
+
+  # Create a temporary directory for extraction
+  TEMP_DIR="$APP_DIR/temp_docker_images"
+  mkdir -p "$TEMP_DIR"
+
+  # Variable to track if we're in the process of cleaning up
+  CLEANING_UP=false
+
+  # Function to handle cleanup
+  cleanup() {
+    # Only run cleanup once
+    if [ "$CLEANING_UP" = true ]; then
+      return
+    fi
+    CLEANING_UP=true
+
+    echo -e "\nInterrupted. Cleaning up..."
+
+    # Kill any background processes we might have started
+    if [ -n "$EXTRACT_PID" ] && kill -0 $EXTRACT_PID 2>/dev/null; then
+      kill $EXTRACT_PID 2>/dev/null
+    fi
+
+    if [ -n "$LOAD_PID" ] && kill -0 $LOAD_PID 2>/dev/null; then
+      kill $LOAD_PID 2>/dev/null
+    fi
+
+    if [ -n "$FEED_PID" ] && kill -0 $FEED_PID 2>/dev/null; then
+      kill $FEED_PID 2>/dev/null
+    fi
+
+    # Remove temporary files
+    rm -f "$TEMP_DIR"/*.tar 2>/dev/null
+    rm -f /tmp/docker_load_output.* 2>/dev/null
+    rm -f /tmp/docker_load_pipe.* 2>/dev/null
+    rm -rf "$TEMP_DIR" 2>/dev/null
+
+    echo "Cleanup completed. Exiting."
+    exit 1
+  }
+
+  # Make sure we clean up the temp directory even if the script exits unexpectedly
+  trap 'cleanup' EXIT INT TERM
+
+  # Check if pv (pipe viewer) is available for progress bar
+  if command -v pv >/dev/null 2>&1; then
+    HAS_PV=true
+  else
+    HAS_PV=false
+    echo "Note: Install 'pv' for better progress visualization (brew install pv)"
+  fi
+
+  # Function to get file size that works on both macOS and Linux
+  get_file_size() {
+    local file="$1"
+    local size=0
+
+    if [ "$OS_TYPE" == "Darwin" ]; then
+      # macOS
+      size=$(stat -f%z "$file" 2>/dev/null)
+    else
+      # Linux and others
+      size=$(stat -c%s "$file" 2>/dev/null)
+    fi
+
+    echo "$size"
+  }
+
+  # Function to convert bytes to MB with 2 decimal places
+  bytes_to_mb() {
+    local bytes="$1"
+    echo "scale=2; $bytes/1048576" | bc
+  }
+
+  # Process each .tar.gz file
+  for archive in "$DOCKER_IMAGES_DIR"/*.tar.gz; do
+    filename=$(basename "$archive")
+    image_name="${filename%.tar.gz}"
+
+    echo "Processing image archive: $filename"
+
+    # Get file size for progress reporting
+    FILE_SIZE=$(get_file_size "$archive")
+    TOTAL_SIZE_MB=$(bytes_to_mb "$FILE_SIZE")
+
+    # Extract the .tar.gz file to get the .tar file
+    echo "  Extracting archive (${TOTAL_SIZE_MB} MB)..."
+
+    if $HAS_PV; then
+      # Use pv to show progress bar
+      pv -s $FILE_SIZE "$archive" | gunzip >"$TEMP_DIR/${image_name}.tar"
+      EXTRACT_STATUS=$?
+      if [ $EXTRACT_STATUS -ne 0 ]; then
+        echo "  Extraction failed. Skipping this image."
+        continue
+      fi
+    else
+      # Simple progress indicator without pv
+      (
+        # Create a background process to extract the file
+        gunzip -c "$archive" >"$TEMP_DIR/${image_name}.tar" &
+        EXTRACT_PID=$!
+
+        # Track progress while extraction is running
+        while kill -0 $EXTRACT_PID 2>/dev/null; do
+          if [ -f "$TEMP_DIR/${image_name}.tar" ]; then
+            CURRENT_SIZE=$(get_file_size "$TEMP_DIR/${image_name}.tar")
+            CURRENT_SIZE_MB=$(bytes_to_mb "$CURRENT_SIZE")
+            PERCENT=$(echo "scale=2; $CURRENT_SIZE*100/$FILE_SIZE" | bc)
+
+            # Print progress and overwrite the line
+            printf "\r  Progress: %s MB / %s MB (%.2f%%)" "$CURRENT_SIZE_MB" "$TOTAL_SIZE_MB" "$PERCENT"
+          fi
+          sleep 0.5
+        done
+
+        # Make sure we end with a newline
+        echo ""
+
+        # Wait for extraction to complete
+        wait $EXTRACT_PID
+        EXTRACT_STATUS=$?
+        if [ $EXTRACT_STATUS -ne 0 ]; then
+          echo "  Extraction failed. Skipping this image."
+          continue
+        fi
+      )
+    fi
+
+    # Load the image into Docker
+    echo "  Loading image into Docker..."
+
+    # Get the size of the tar file for progress reporting
+    TAR_SIZE=$(get_file_size "$TEMP_DIR/${image_name}.tar")
+    TAR_SIZE_MB=$(bytes_to_mb "$TAR_SIZE")
+
+    if $HAS_PV; then
+      # Use pv to show progress bar for loading
+      pv -s $TAR_SIZE "$TEMP_DIR/${image_name}.tar" | $DOCKER_CMD load
+      LOAD_STATUS=$?
+    else
+      # Start a spinner for the loading process
+      echo -n "  Loading: "
+
+      # Create a named pipe for better signal handling
+      PIPE_NAME="/tmp/docker_load_pipe.$$"
+      mkfifo "$PIPE_NAME" 2>/dev/null
+
+      # Start Docker load in background, reading from the pipe
+      $DOCKER_CMD load <"$PIPE_NAME" >/tmp/docker_load_output.$$ 2>&1 &
+      LOAD_PID=$!
+
+      # Start a background process to feed the tar file to the pipe
+      (cat "$TEMP_DIR/${image_name}.tar" >"$PIPE_NAME") &
+      FEED_PID=$!
+
+      # Array of spinner characters
+      SPINNER=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+      i=0
+
+      # Show spinner while the load is running
+      while kill -0 $LOAD_PID 2>/dev/null && kill -0 $FEED_PID 2>/dev/null; do
+        echo -ne "\r  Loading: ${SPINNER[$i]} (${TAR_SIZE_MB} MB)"
+        i=$(((i + 1) % 10))
+        sleep 0.1
+      done
+
+      # Get the exit status
+      wait $LOAD_PID
+      LOAD_STATUS=$?
+
+      # Make sure the feed process is terminated
+      if kill -0 $FEED_PID 2>/dev/null; then
+        kill $FEED_PID 2>/dev/null
+      fi
+
+      # Remove the named pipe
+      rm -f "$PIPE_NAME" 2>/dev/null
+
+      # Clear the spinner line
+      echo -ne "\r\033[K"
+    fi
+
+    if [ $LOAD_STATUS -eq 0 ]; then
+      echo "  Image loaded successfully."
+    else
+      echo "  Failed to load image. Continuing with next image..."
+    fi
+
+    # Remove the temporary .tar file
+    rm -f "$TEMP_DIR/${image_name}.tar"
+    # Also remove the temporary output file if it exists
+    rm -f /tmp/docker_load_output.$$
+  done
+
+  # Clean up the temporary directory (this will also be done by the trap if something fails)
+  rm -rf "$TEMP_DIR"
+
+  # Reset traps to their default behavior
+  trap - EXIT INT TERM
+
+  echo "Docker image loading process completed."
+}
+
 start_services() {
   if [ ! -d "$APP_DIR" ]; then
     echo "App not initialized. Starting app initialization..."
@@ -44,6 +263,7 @@ start_services() {
 
   echo "Starting colima VM..."
   colima start --cpu 4 --memory 8 --disk 30 --mount-type virtiofs
+  load_images
   cd "$APP_DIR/repo" && $BASH_CMD quick-start.sh --colima
 }
 
