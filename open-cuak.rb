@@ -5,10 +5,14 @@ class OpenCuak < Formula
   sha256 "5753619050b5ab6def2eef8fdffed20f66434f8a8877234b474d0e4beb2ccb82"
   license "MIT"
 
+  depends_on "bc"
   depends_on "colima"
+  depends_on "coreutils"
   depends_on "curl"
   depends_on "docker"
-  depends_on "docker-compose"
+  depends_on "gnu-sed"
+  depends_on "pv" 
+  depends_on "unzip"
 
   def install
     script_path = "open-cuak"
