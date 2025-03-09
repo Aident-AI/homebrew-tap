@@ -16,28 +16,21 @@ fi
 
 init() {
   # Check for --reset parameter
-  RESET_MODE=false
   if [ "$1" == "--reset" ]; then
-    RESET_MODE=true
-    echo "Reset mode enabled. Will clear existing repository and docker images..."
+    echo "Reset mode enabled. Removing entire Open-CUAK directory..."
+    if [ -d "$APP_DIR" ]; then
+      $RM_DIR_CMD "$APP_DIR"
+      echo "Removed $APP_DIR"
+    fi
   fi
 
   echo "Initializing Open-CUAK services..."
 
+  # Create app directory
   mkdir -p "$APP_DIR"
 
-  # Handle repo directory based on reset mode
-  if [ -d "$APP_DIR/repo" ]; then
-    if [ "$RESET_MODE" = true ]; then
-      echo "Removing existing repository directory..."
-      $RM_DIR_CMD "$APP_DIR/repo"
-    else
-      echo "Repository directory already exists. Use --reset to force reinitialization."
-    fi
-  fi
-
-  # Only proceed with repo download if it doesn't exist or we're in reset mode
-  if [ ! -d "$APP_DIR/repo" ] || [ "$RESET_MODE" = true ]; then
+  # Download repository if it doesn't exist
+  if [ ! -d "$APP_DIR/repo" ]; then
     echo "Pulling latest code from repository..."
     curl -L https://github.com/Aident-AI/open-cuak/archive/refs/heads/main.zip -o "$APP_DIR/main.zip"
     unzip -q "$APP_DIR/main.zip" -d "$APP_DIR/temp" &>/dev/null
@@ -45,15 +38,12 @@ init() {
     $RM_DIR_CMD -rf "$APP_DIR/temp"
     $RM_DIR_CMD "$APP_DIR/main.zip"
     echo "Unzipped the repository to $APP_DIR/repo"
+  else
+    echo "Repository directory already exists at $APP_DIR/repo"
   fi
 
-  # Check if docker-images directory exists, create it if not, or clear it if in reset mode
+  # Check if docker-images directory exists, create it if not
   DOCKER_IMAGES_DIR="$APP_DIR/docker-images"
-  if [ -d "$DOCKER_IMAGES_DIR" ] && [ "$RESET_MODE" = true ]; then
-    echo "Removing existing docker images directory..."
-    $RM_DIR_CMD "$DOCKER_IMAGES_DIR"
-  fi
-
   if [ ! -d "$DOCKER_IMAGES_DIR" ]; then
     echo "Creating docker-images directory at $DOCKER_IMAGES_DIR..."
     mkdir -p "$DOCKER_IMAGES_DIR"
@@ -78,24 +68,380 @@ init() {
       "https://opencuak.blob.core.windows.net/docker-images/timberio_vector_0.28.1-alpine.tar.gz"
     )
 
-    # Download each Docker image archive
-    for image_url in "${DOCKER_IMAGES[@]}"; do
-      filename=$(basename "$image_url")
-      echo "Downloading $filename..."
-      curl -L "$image_url" -o "$DOCKER_IMAGES_DIR/$filename"
-      if [ $? -eq 0 ]; then
-        echo "Successfully downloaded $filename"
+    # Create a temporary directory for download logs
+    DOWNLOAD_LOGS_DIR="$APP_DIR/download_logs"
+    mkdir -p "$DOWNLOAD_LOGS_DIR"
+
+    # Function to download a single image
+    download_image() {
+      local image_url="$1"
+      local log_file="$2"
+      local filename=$(basename "$image_url")
+      local size_file="${log_file}.size"
+      local start_time=$(date +%s)
+
+      echo "Starting download: $filename" >"$log_file"
+
+      # Get the expected file size from the server before downloading
+      local expected_size=$(curl -sI "$image_url" | grep -i "Content-Length" | awk '{print $2}' | tr -d '\r')
+      if [ -n "$expected_size" ]; then
+        echo "EXPECTED_SIZE: $expected_size" >>"$log_file"
+      fi
+
+      # Start a background process to track file size growth for speed calculation
+      (
+        while true; do
+          if [ -f "$DOCKER_IMAGES_DIR/$filename" ]; then
+            # Get current file size and timestamp
+            current_size=0
+            if [ "$OS_TYPE" == "Darwin" ]; then
+              # macOS
+              current_size=$(stat -f%z "$DOCKER_IMAGES_DIR/$filename" 2>/dev/null)
+            else
+              # Linux and others
+              current_size=$(stat -c%s "$DOCKER_IMAGES_DIR/$filename" 2>/dev/null)
+            fi
+            current_time=$(date +%s)
+
+            # Write size and timestamp to size file
+            echo "${current_size},${current_time},${start_time}" >"$size_file"
+          fi
+          sleep 0.5
+
+          # Check if download has completed or failed
+          if grep -q "COMPLETED\|FAILED" "$log_file" 2>/dev/null; then
+            break
+          fi
+        done
+      ) &
+      size_tracker_pid=$!
+
+      # Perform the actual download
+      curl -L "$image_url" -o "$DOCKER_IMAGES_DIR/$filename" --silent --show-error >>"$log_file" 2>&1
+      local status=$?
+
+      # Record completion status
+      if [ $status -eq 0 ]; then
+        # Get final file size
+        local final_size=0
+        if [ "$OS_TYPE" == "Darwin" ]; then
+          final_size=$(stat -f%z "$DOCKER_IMAGES_DIR/$filename" 2>/dev/null)
+        else
+          final_size=$(stat -c%s "$DOCKER_IMAGES_DIR/$filename" 2>/dev/null)
+        fi
+        echo "COMPLETED: $filename (size: $final_size bytes)" >>"$log_file"
       else
-        echo "Failed to download $filename"
+        echo "FAILED: $filename (error code: $status)" >>"$log_file"
+      fi
+
+      # Make sure size tracker is terminated
+      if kill -0 $size_tracker_pid 2>/dev/null; then
+        kill $size_tracker_pid 2>/dev/null
+      fi
+
+      return $status
+    }
+
+    # Function to format size in human-readable format
+    format_size() {
+      local size=$1
+
+      if [ -z "$size" ] || [ "$size" -eq 0 ]; then
+        echo "0 B"
+        return
+      fi
+
+      if [ "$size" -ge 1073741824 ]; then
+        # GB
+        echo "$(echo "scale=2; $size/1073741824" | bc) GB"
+      elif [ "$size" -ge 1048576 ]; then
+        # MB
+        echo "$(echo "scale=2; $size/1048576" | bc) MB"
+      elif [ "$size" -ge 1024 ]; then
+        # KB
+        echo "$(echo "scale=2; $size/1024" | bc) KB"
+      else
+        # Bytes
+        echo "$size B"
+      fi
+    }
+
+    # Function to calculate download speed and progress
+    calculate_download_info() {
+      local size_file=$1
+      local log_file=$2
+      local result="0 KB/s|0|0" # Format: speed|current_size|total_size
+
+      if [ -f "$size_file" ] && [ -f "$log_file" ]; then
+        # Read current size and timestamps
+        local data=$(cat "$size_file" 2>/dev/null)
+        if [ -z "$data" ]; then
+          echo "$result"
+          return
+        fi
+
+        local current_size=$(echo "$data" | cut -d',' -f1)
+        local current_time=$(echo "$data" | cut -d',' -f2)
+        local start_time=$(echo "$data" | cut -d',' -f3)
+
+        # Get expected size if available
+        local expected_size=$(grep "EXPECTED_SIZE:" "$log_file" | sed 's/EXPECTED_SIZE: //' | tr -d '\r')
+        if [ -z "$expected_size" ]; then
+          expected_size=0
+        fi
+
+        # Calculate elapsed time since start
+        local elapsed=$((current_time - start_time))
+        if [ $elapsed -le 0 ]; then
+          elapsed=1
+        fi
+
+        # Calculate average speed over the entire download
+        local avg_bytes_per_sec=0
+        if [ $elapsed -gt 0 ]; then
+          avg_bytes_per_sec=$((current_size / elapsed))
+        fi
+
+        # Format speed
+        local speed=""
+        if [ $avg_bytes_per_sec -ge 1048576 ]; then
+          # MB/s
+          local mb_per_sec=$(echo "scale=2; $avg_bytes_per_sec/1048576" | bc)
+          speed="${mb_per_sec} MB/s"
+        else
+          # KB/s
+          local kb_per_sec=$(echo "scale=2; $avg_bytes_per_sec/1024" | bc)
+          speed="${kb_per_sec} KB/s"
+        fi
+
+        result="${speed}|${current_size}|${expected_size}"
+      fi
+
+      echo "$result"
+    }
+
+    # Simple progress display function
+    display_progress() {
+      local total=${#DOCKER_IMAGES[@]}
+      local completed=0
+      local failed=0
+      local spinner=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+      local spin_idx=0
+      local active_downloads=0
+      local total_speed="0 KB/s"
+      local total_downloaded=0
+      local total_expected=0
+
+      # Initial progress display
+      echo "0/$total images downloaded (0%)"
+
+      while true; do
+        # Count completed and failed downloads
+        completed=0
+        failed=0
+        active_downloads=0
+        active_files=""
+        total_downloaded=0
+        total_expected=0
+        total_speed_bytes=0
+
+        # Process each log file individually to avoid syntax errors
+        for log_file in "$DOWNLOAD_LOGS_DIR"/download_*.log; do
+          if [ -f "$log_file" ]; then
+            # Check for completed downloads
+            if grep -q "COMPLETED:" "$log_file" 2>/dev/null; then
+              completed=$((completed + 1))
+              # Extract the completed file size
+              local completed_size=$(grep "COMPLETED:" "$log_file" | grep -o "size: [0-9]*" | awk '{print $2}')
+              if [ -n "$completed_size" ]; then
+                total_downloaded=$((total_downloaded + completed_size))
+                total_expected=$((total_expected + completed_size))
+              fi
+            # Check for failed downloads
+            elif grep -q "FAILED:" "$log_file" 2>/dev/null; then
+              failed=$((failed + 1))
+            # Check for active downloads
+            elif grep -q "Starting download:" "$log_file" 2>/dev/null; then
+              # Extract filename for active downloads
+              filename=$(grep "Starting download:" "$log_file" | sed 's/Starting download: //')
+              active_files="$active_files $filename"
+              active_downloads=$((active_downloads + 1))
+
+              # Get download info (speed, current size, expected size)
+              size_file="${log_file}.size"
+              download_info=$(calculate_download_info "$size_file" "$log_file")
+
+              # Parse download info
+              IFS='|' read -r speed current_size expected_size <<<"$download_info"
+
+              # Add to totals
+              if [ -n "$current_size" ] && [ "$current_size" -gt 0 ]; then
+                total_downloaded=$((total_downloaded + current_size))
+              fi
+
+              if [ -n "$expected_size" ] && [ "$expected_size" -gt 0 ]; then
+                total_expected=$((total_expected + expected_size))
+              fi
+
+              # Extract speed value for total calculation
+              speed_value=$(echo "$speed" | awk '{print $1}')
+              speed_unit=$(echo "$speed" | awk '{print $2}')
+
+              # Convert to bytes per second for addition
+              if [ -n "$speed_value" ] && [ -n "$speed_unit" ]; then
+                if [ "$speed_unit" = "MB/s" ]; then
+                  bytes_per_sec=$(echo "scale=0; $speed_value * 1048576 / 1" | bc)
+                elif [ "$speed_unit" = "KB/s" ]; then
+                  bytes_per_sec=$(echo "scale=0; $speed_value * 1024 / 1" | bc)
+                else
+                  bytes_per_sec=0
+                fi
+                total_speed_bytes=$((total_speed_bytes + bytes_per_sec))
+              fi
+            fi
+          fi
+        done
+
+        # Calculate percentage based on completed files
+        local percent=$((completed * 100 / total))
+
+        # Calculate overall progress percentage if we have expected sizes
+        local overall_percent=0
+        if [ $total_expected -gt 0 ]; then
+          overall_percent=$(echo "scale=0; $total_downloaded * 100 / $total_expected" | bc)
+          # Cap at 99% until all downloads are complete
+          if [ $overall_percent -ge 100 ] && [ $completed -lt $total ]; then
+            overall_percent=99
+          fi
+        else
+          # Fallback to completed files percentage
+          overall_percent=$percent
+        fi
+
+        # Update spinner
+        local spin_char="${spinner[$spin_idx]}"
+        spin_idx=$(((spin_idx + 1) % 10))
+
+        # Format the total speed
+        if [ $total_speed_bytes -ge 1048576 ]; then
+          # Convert to MB/s
+          total_speed="$(echo "scale=2; $total_speed_bytes/1048576" | bc) MB/s"
+        else
+          # Convert to KB/s
+          total_speed="$(echo "scale=2; $total_speed_bytes/1024" | bc) KB/s"
+        fi
+
+        # Format total downloaded/expected sizes
+        total_downloaded_fmt=$(format_size $total_downloaded)
+        total_expected_fmt=$(format_size $total_expected)
+
+        # Clear previous line and show progress with speed and sizes
+        if [ $total_expected -gt 0 ]; then
+          echo -ne "\r\033[K$completed/$total files ($overall_percent%) - $total_downloaded_fmt/$total_expected_fmt - $total_speed $spin_char"
+        else
+          echo -ne "\r\033[K$completed/$total files ($percent%) - $total_downloaded_fmt - $total_speed $spin_char"
+        fi
+
+        # If all downloads are complete or failed, break the loop
+        if [ $((completed + failed)) -eq $total ]; then
+          break
+        fi
+
+        sleep 1
+      done
+
+      # Final newline after progress display
+      echo ""
+
+      # Final status
+      if [ $failed -eq 0 ]; then
+        echo "All $total Docker image archives downloaded successfully to $DOCKER_IMAGES_DIR"
+        echo "Total downloaded: $(format_size $total_downloaded)"
+      else
+        echo "$completed/$total downloads completed, $failed failed."
+        echo "Total downloaded: $(format_size $total_downloaded)"
+        echo "Failed downloads:"
+        for log_file in "$DOWNLOAD_LOGS_DIR"/download_*.log; do
+          if grep -q "FAILED:" "$log_file" 2>/dev/null; then
+            grep "FAILED:" "$log_file" | sed 's/FAILED: //'
+          fi
+        done
+      fi
+
+      # Clean up size tracking files
+      rm -f "$DOWNLOAD_LOGS_DIR"/*.size "$DOWNLOAD_LOGS_DIR"/*.size.prev 2>/dev/null
+    }
+
+    # Download images in parallel (max 4 at a time)
+    MAX_PARALLEL=4
+
+    # Start the progress display in the background
+    display_progress &
+    PROGRESS_PID=$!
+
+    # Ensure we kill the progress display when the script exits
+    trap 'kill $PROGRESS_PID 2>/dev/null' EXIT
+
+    # Use a more compatible approach for parallel downloads
+    total=${#DOCKER_IMAGES[@]}
+    index=0
+    active_pids=()
+
+    while [ $index -lt $total ] || [ ${#active_pids[@]} -gt 0 ]; do
+      # Start new downloads if we have capacity and more images to download
+      while [ ${#active_pids[@]} -lt $MAX_PARALLEL ] && [ $index -lt $total ]; do
+        image_url="${DOCKER_IMAGES[$index]}"
+        log_file="$DOWNLOAD_LOGS_DIR/download_$index.log"
+
+        # Start download in background
+        download_image "$image_url" "$log_file" &
+        pid=$!
+        active_pids+=($pid)
+        index=$((index + 1))
+      done
+
+      # No more capacity or no more images to start, wait for any process to finish
+      if [ ${#active_pids[@]} -gt 0 ]; then
+        # Wait for any child process to finish (compatible approach)
+        sleep 0.5
+
+        # Check which processes have finished and remove them from active_pids
+        new_active_pids=()
+        for pid in "${active_pids[@]}"; do
+          if kill -0 $pid 2>/dev/null; then
+            # Process is still running
+            new_active_pids+=($pid)
+          fi
+        done
+        active_pids=("${new_active_pids[@]}")
       fi
     done
 
-    echo "All Docker image archives downloaded to $DOCKER_IMAGES_DIR"
+    # Wait for all remaining downloads to complete
+    wait
+
+    # Kill the progress display
+    kill $PROGRESS_PID 2>/dev/null
+    wait $PROGRESS_PID 2>/dev/null || true
+
+    # Check for any failed downloads
+    FAILED_COUNT=0
+    for log_file in "$DOWNLOAD_LOGS_DIR"/download_*.log; do
+      if grep -q "FAILED:" "$log_file" 2>/dev/null; then
+        FAILED_COUNT=$((FAILED_COUNT + 1))
+      fi
+    done
+
+    if [ $FAILED_COUNT -gt 0 ]; then
+      echo "Warning: $FAILED_COUNT downloads failed. You may need to run 'open-cuak init --reset' to retry."
+    fi
+
+    # Clean up download logs
+    $RM_DIR_CMD -rf "$DOWNLOAD_LOGS_DIR"
+
   else
     echo "Docker images directory already exists at $DOCKER_IMAGES_DIR"
-    if [ "$RESET_MODE" = false ]; then
-      echo "Use --reset to force redownload of docker images."
-    fi
+    echo "Use 'open-cuak init --reset' to force redownload of docker images."
   fi
 
   # Create necessary directories with correct permissions
@@ -336,6 +682,7 @@ start_services() {
 
   echo "Starting colima VM..."
   colima start --cpu 4 --memory 8 --disk 30 --mount-type virtiofs
+  docker context use default
 
   # Only load images if VM didn't exist before (new VM or previously deleted)
   if [ "$vm_exists" = false ]; then
