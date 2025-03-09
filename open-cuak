@@ -15,21 +15,88 @@ if [ "$OS_TYPE" == "Linux" ]; then
 fi
 
 init() {
+  # Check for --reset parameter
+  RESET_MODE=false
+  if [ "$1" == "--reset" ]; then
+    RESET_MODE=true
+    echo "Reset mode enabled. Will clear existing repository and docker images..."
+  fi
+
   echo "Initializing Open-CUAK services..."
 
   mkdir -p "$APP_DIR"
+
+  # Handle repo directory based on reset mode
   if [ -d "$APP_DIR/repo" ]; then
-    echo "Removing existing repository directory..."
-    $RM_DIR_CMD "$APP_DIR/repo"
+    if [ "$RESET_MODE" = true ]; then
+      echo "Removing existing repository directory..."
+      $RM_DIR_CMD "$APP_DIR/repo"
+    else
+      echo "Repository directory already exists. Use --reset to force reinitialization."
+    fi
   fi
 
-  echo "Pulling latest code from repository..."
-  curl -L https://github.com/Aident-AI/open-cuak/archive/refs/heads/main.zip -o "$APP_DIR/main.zip"
-  unzip -q "$APP_DIR/main.zip" -d "$APP_DIR/temp" &>/dev/null
-  mv "$APP_DIR/temp/open-cuak-main" "$APP_DIR/repo"
-  $RM_DIR_CMD -rf "$APP_DIR/temp"
-  $RM_DIR_CMD "$APP_DIR/main.zip"
-  echo "Unzipped the repository to $APP_DIR/repo"
+  # Only proceed with repo download if it doesn't exist or we're in reset mode
+  if [ ! -d "$APP_DIR/repo" ] || [ "$RESET_MODE" = true ]; then
+    echo "Pulling latest code from repository..."
+    curl -L https://github.com/Aident-AI/open-cuak/archive/refs/heads/main.zip -o "$APP_DIR/main.zip"
+    unzip -q "$APP_DIR/main.zip" -d "$APP_DIR/temp" &>/dev/null
+    mv "$APP_DIR/temp/open-cuak-main" "$APP_DIR/repo"
+    $RM_DIR_CMD -rf "$APP_DIR/temp"
+    $RM_DIR_CMD "$APP_DIR/main.zip"
+    echo "Unzipped the repository to $APP_DIR/repo"
+  fi
+
+  # Check if docker-images directory exists, create it if not, or clear it if in reset mode
+  DOCKER_IMAGES_DIR="$APP_DIR/docker-images"
+  if [ -d "$DOCKER_IMAGES_DIR" ] && [ "$RESET_MODE" = true ]; then
+    echo "Removing existing docker images directory..."
+    $RM_DIR_CMD "$DOCKER_IMAGES_DIR"
+  fi
+
+  if [ ! -d "$DOCKER_IMAGES_DIR" ]; then
+    echo "Creating docker-images directory at $DOCKER_IMAGES_DIR..."
+    mkdir -p "$DOCKER_IMAGES_DIR"
+
+    echo "Downloading Docker image archives..."
+    # List of Docker image archives to download
+    DOCKER_IMAGES=(
+      "https://opencuak.blob.core.windows.net/docker-images/darthsim_imgproxy_v3.8.0.tar.gz"
+      "https://opencuak.blob.core.windows.net/docker-images/ghcr.io_aident-ai_open-cuak-browserless_stable.tar.gz"
+      "https://opencuak.blob.core.windows.net/docker-images/ghcr.io_aident-ai_open-cuak-web_stable.tar.gz"
+      "https://opencuak.blob.core.windows.net/docker-images/kong_2.8.1.tar.gz"
+      "https://opencuak.blob.core.windows.net/docker-images/postgrest_postgrest_v12.2.0.tar.gz"
+      "https://opencuak.blob.core.windows.net/docker-images/supabase_edge-runtime_v1.67.0.tar.gz"
+      "https://opencuak.blob.core.windows.net/docker-images/supabase_gotrue_v2.167.0.tar.gz"
+      "https://opencuak.blob.core.windows.net/docker-images/supabase_logflare_1.4.0.tar.gz"
+      "https://opencuak.blob.core.windows.net/docker-images/supabase_postgres-meta_v0.84.2.tar.gz"
+      "https://opencuak.blob.core.windows.net/docker-images/supabase_postgres_15.8.1.020.tar.gz"
+      "https://opencuak.blob.core.windows.net/docker-images/supabase_realtime_v2.34.7.tar.gz"
+      "https://opencuak.blob.core.windows.net/docker-images/supabase_storage-api_v1.14.5.tar.gz"
+      "https://opencuak.blob.core.windows.net/docker-images/supabase_studio_20250113-83c9420.tar.gz"
+      "https://opencuak.blob.core.windows.net/docker-images/supabase_supavisor_1.1.56.tar.gz"
+      "https://opencuak.blob.core.windows.net/docker-images/timberio_vector_0.28.1-alpine.tar.gz"
+    )
+
+    # Download each Docker image archive
+    for image_url in "${DOCKER_IMAGES[@]}"; do
+      filename=$(basename "$image_url")
+      echo "Downloading $filename..."
+      curl -L "$image_url" -o "$DOCKER_IMAGES_DIR/$filename"
+      if [ $? -eq 0 ]; then
+        echo "Successfully downloaded $filename"
+      else
+        echo "Failed to download $filename"
+      fi
+    done
+
+    echo "All Docker image archives downloaded to $DOCKER_IMAGES_DIR"
+  else
+    echo "Docker images directory already exists at $DOCKER_IMAGES_DIR"
+    if [ "$RESET_MODE" = false ]; then
+      echo "Use --reset to force redownload of docker images."
+    fi
+  fi
 
   # Create necessary directories with correct permissions
   echo "Setting up required directories with proper permissions..."
@@ -597,23 +664,29 @@ logs() {
 }
 
 help() {
-  echo "Usage: open-cuak {init|start|stop|restart|clear|status|stats|logs|version|use VERSION|help}"
+  echo "Usage: open-cuak {init [--reset]|start|stop|restart|clear|status|stats|logs|version|use VERSION|help}"
   echo "Commands:"
-  echo "  init        - Initialize Open-CUAK services"
-  echo "  start       - Start Open-CUAK services"
-  echo "  stop        - Stop Open-CUAK services"
-  echo "  restart     - Restart Open-CUAK services"
-  echo "  clear       - Clear Open-CUAK services and data"
-  echo "  status      - Show the status of Open-CUAK services"
-  echo "  stats       - Show Docker stats"
-  echo "  logs        - Show logs for a specific container (web|browserless)"
-  echo "  version     - Show CLI and app versions"
-  echo "  use VERSION - Set the version of Open-CUAK app image to pull (stable/latest/specific-sha)"
-  echo "  help        - Show this help message"
+  echo "  init [--reset]  - Initialize Open-CUAK services. Use --reset to clear existing repository and docker images."
+  echo "  start           - Start Open-CUAK services"
+  echo "  stop            - Stop Open-CUAK services"
+  echo "  restart         - Restart Open-CUAK services"
+  echo "  clear           - Clear Open-CUAK services and data"
+  echo "  status          - Show the status of Open-CUAK services"
+  echo "  stats           - Show Docker stats"
+  echo "  logs            - Show logs for a specific container (web|browserless)"
+  echo "  version         - Show CLI and app versions"
+  echo "  use VERSION     - Set the version of Open-CUAK app image to pull (stable/latest/specific-sha)"
+  echo "  help            - Show this help message"
 }
 
 case "$1" in
-init) init ;;
+init)
+  if [ "$2" == "--reset" ]; then
+    init "--reset"
+  else
+    init
+  fi
+  ;;
 start) start_services ;;
 stop) stop_services ;;
 restart) restart_services ;;
